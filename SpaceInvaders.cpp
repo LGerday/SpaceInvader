@@ -10,6 +10,7 @@
 
 // Dimensions de la grille de jeu
 #define NB_LIGNE   18
+#define LIGNE_VAISSEAU 17
 #define NB_COLONNE 23 
 
 // Direction de mouvement
@@ -204,11 +205,11 @@ void *fctVaisseau(void *)
     perror("Erreur lock mutex grille \n");
     exit(1);
   }
-  if(tab[NB_LIGNE-1][colonne].type == VIDE)
+  if(tab[LIGNE_VAISSEAU][colonne].type == VIDE)
   {  
-    tab[NB_LIGNE-1][colonne].type = VAISSEAU;
-    tab[NB_LIGNE-1][colonne].tid = pthread_self();
-    DessineVaisseau(NB_LIGNE-1,colonne);
+    tab[LIGNE_VAISSEAU][colonne].type = VAISSEAU;
+    tab[LIGNE_VAISSEAU][colonne].tid = pthread_self();
+    DessineVaisseau(LIGNE_VAISSEAU,colonne);
   }
   else
   {
@@ -222,6 +223,8 @@ void *fctVaisseau(void *)
   }
   while(1)
     pause();
+
+
   pthread_exit(NULL);
 }
 
@@ -253,16 +256,17 @@ void HandlerSigusr1(int sig)
   }
   else
   {
-    tab[NB_LIGNE-1][colonne].type = VIDE;
-    tab[NB_LIGNE-1][colonne].tid = 0;
-    EffaceCarre(NB_LIGNE-1,colonne);
-    if(tab[NB_LIGNE-1][colonne+1].type == VIDE)
+    tab[LIGNE_VAISSEAU][colonne].type = VIDE;
+    tab[LIGNE_VAISSEAU][colonne].tid = 0;
+    EffaceCarre(LIGNE_VAISSEAU,colonne);
+
+    if(tab[LIGNE_VAISSEAU][colonne+1].type == VIDE)
     {
       colonne++;
-      tab[NB_LIGNE-1][colonne].type = VAISSEAU;
-      tab[NB_LIGNE-1][colonne].tid = pthread_self();
-      DessineVaisseau(NB_LIGNE-1,colonne);
-      printf("Vaisseau deplacer sur la droite\n");     
+      tab[LIGNE_VAISSEAU][colonne].type = VAISSEAU;
+      tab[LIGNE_VAISSEAU][colonne].tid = pthread_self();
+      DessineVaisseau(LIGNE_VAISSEAU,colonne);
+      printf("Vaisseau deplacé sur la droite\n");     
     }
     else
       printf("Erreur colision vaisseau droite\n");
@@ -275,6 +279,8 @@ void HandlerSigusr1(int sig)
     exit(1);
   }
 }
+
+
 void HandlerSigusr2(int sig)
 {
   printf("SIGUSR1 recu un pas a droite\n");
@@ -290,14 +296,14 @@ void HandlerSigusr2(int sig)
   }
   else
   {
-    tab[NB_LIGNE-1][colonne].type = VIDE;
-    tab[NB_LIGNE-1][colonne].tid = 0;
-    EffaceCarre(NB_LIGNE-1,colonne);
-    if(tab[NB_LIGNE-1][colonne-1].type == VIDE)
+    tab[LIGNE_VAISSEAU][colonne].type = VIDE;
+    tab[LIGNE_VAISSEAU][colonne].tid = 0;
+    EffaceCarre(LIGNE_VAISSEAU,colonne);
+    if(tab[LIGNE_VAISSEAU][colonne-1].type == VIDE)
     {
       colonne--;
-      tab[NB_LIGNE-1][colonne].type = VAISSEAU;
-      tab[NB_LIGNE-1][colonne].tid = pthread_self();
+      tab[LIGNE_VAISSEAU][colonne].type = VAISSEAU;
+      tab[LIGNE_VAISSEAU][colonne].tid = pthread_self();
       DessineVaisseau(NB_LIGNE-1,colonne);
       printf("Vaisseau deplacer sur la gauche\n");     
     }
@@ -337,14 +343,15 @@ void HandlerSighup(int sig)
 }
 void *fctMissile(void*)
 {
-  int missColone;
+  int missColone = colonne;
   int ligne = NB_LIGNE -2;
-  missColone = colonne;
+
   if( pthread_mutex_lock(&mutexGrille) != 0)
   {
     perror("Erreur lock mutex grille \n");
     exit(1);
   }
+
   switch(tab[ligne][missColone].type)
   {
     case 0: {
@@ -390,7 +397,9 @@ void *fctMissile(void*)
       pthread_exit(NULL); 
     }
   }
+
   Attente(80);
+  
   while(1)
   {
     if( pthread_mutex_lock(&mutexGrille) != 0)
@@ -469,6 +478,8 @@ void *fctMissile(void*)
   Attente(80);
   }
 }
+
+
 void *fctTimeOut(void*){
   Attente(600);
   fireOn = true;
