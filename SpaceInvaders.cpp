@@ -80,7 +80,7 @@ int main(int argc,char* argv[])
   srand((unsigned)time(NULL));
 
   // Ouverture de la fenetre graphique
-  printf("(MAIN %d) Ouverture de la fenetre graphique\n",pthread_self()); fflush(stdout);
+  printf("(MAIN %ld) Ouverture de la fenetre graphique\n",pthread_self()); fflush(stdout);
   if (OuvertureFenetreGraphique() < 0)
   {
     printf("Erreur de OuvrirGrilleSDL\n");
@@ -142,7 +142,7 @@ int main(int argc,char* argv[])
   DessineVaisseauAmiral(0,15);
   DessineBombe(8,16);*/
 
-  printf("(MAIN %d) Attente du clic sur la croix\n",pthread_self());  
+  printf("(MAIN %ld) Attente du clic sur la croix\n",pthread_self());  
   bool ok = false;
   while(!ok)
   {
@@ -177,7 +177,7 @@ int main(int argc,char* argv[])
   }
 
   // Fermeture de la fenetre
-  printf("(MAIN %d) Fermeture de la fenetre graphique...",pthread_self()); fflush(stdout);
+  printf("(MAIN %ld) Fermeture de la fenetre graphique...",pthread_self()); fflush(stdout);
   FermetureFenetreGraphique();
   printf("OK\n");
 
@@ -224,10 +224,20 @@ void *fctVaisseau(void *)
     pause();
   pthread_exit(NULL);
 }
+
+
 int caseVide(int l,int c)
 {
 
+
+
+  return 0;
+
+
 }
+
+
+
 void HandlerSigusr1(int sig)
 {
   printf("SIGUSR1 recu un pas a droite\n");
