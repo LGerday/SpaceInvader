@@ -62,7 +62,8 @@ void HandlerSighup(int sig);
 void HandlerSigint(int sig);
 void HandlerSigquit(int sig);
 void HandlerSigalarme(int sig);
-struct sigaction gauche,droite,espace,missile,mortVaisseau,bombe,amiral;
+void HandlerSigchld(int sig);
+struct sigaction gauche,droite,espace,missile,mortVaisseau,bombe,amiral,amiralSIGCHLD;
 pthread_t Vaiss,Missile,TimeOutMissile,Event,FlotteAliens,Invader,Score,Bombe,Amiral; // identifiant different thread
 pthread_mutex_t mutexGrille,mutexColonne,mutexFlotteAliens,mutexScore,mutexVie; // mutex de la grille
 pthread_cond_t condScore,condVies,condFlotteAliens;
@@ -150,11 +151,6 @@ int main(int argc,char* argv[])
   sigemptyset(&droite.sa_mask);
   droite.sa_flags = 0;
   sigaction(SIGUSR1,&droite,NULL);
-
-  amiral.sa_handler = HandlerSigalarme;
-  sigemptyset(&amiral.sa_mask);
-  amiral.sa_flags = 0;
-  sigaction(SIGALRM,&amiral,NULL);
 
   gauche.sa_handler = HandlerSigusr2;
   sigemptyset(&gauche.sa_mask);
@@ -249,19 +245,26 @@ int main(int argc,char* argv[])
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
+void HandlerSigchld(int sig){
+  printf("Reception sigchld\n");
+  alarm(0);
+  alarmStop = true;
+}
 void HandlerSigalarme(int sig)
 {
-  printf("Reception sigalrm");
+  printf("Reception sigalrm\n");
   alarmStop = true;
 }
 void *fctAmiral(void*){
-  /*sigset_t mask;
+  sigset_t mask;
   amiral.sa_handler = HandlerSigalarme;
   sigaction(SIGALRM,&amiral,NULL);
 
+  amiralSIGCHLD.sa_handler = HandlerSigchld;
+  sigaction(SIGCHLD,&amiralSIGCHLD,NULL);
+
   sigemptyset(&mask);
   sigaddset(&mask,SIGUSR1);
-  sigaddset(&mask,SIGCHLD);
   sigaddset(&mask,SIGUSR2);
   sigaddset(&mask,SIGHUP);
   sigaddset(&mask,SIGQUIT);
@@ -271,6 +274,17 @@ void *fctAmiral(void*){
   int depl;
   while(1)
   {
+    
+    if(alarmStop)
+    {
+      pthread_mutex_lock(&mutexGrille);
+      setTab(0,spawn,VIDE,0);
+      setTab(0,spawn+1,VIDE,0);
+      EffaceCarre(0,spawn);
+      EffaceCarre(0,spawn +1);
+      pthread_mutex_unlock(&mutexGrille);
+    }
+
     alarmStop = false;
     pthread_mutex_lock(&mutexFlotteAliens);
     while((nbAliens%6) != 0 || (nbAliens == 0))
@@ -278,11 +292,11 @@ void *fctAmiral(void*){
       pthread_cond_wait(&condFlotteAliens,&mutexFlotteAliens);
     }
     pthread_mutex_unlock(&mutexFlotteAliens);
-    spawn = rand()%23 +8;
+    spawn = rand()%14 +8;
     depl = rand()%2+1;
     printf("depl : %d\n",depl);
     nbalarm = rand()%8+4;
-    nbalarm = nbalarm * 1000; // convertir en seconde pour Attente
+    printf("nb alarm : %d",nbalarm);
     
     if(tab[0][spawn].type == VIDE && tab[0][spawn+1].type == VIDE)
     {
@@ -290,13 +304,15 @@ void *fctAmiral(void*){
       setTab(0,spawn,AMIRAL,pthread_self());
       setTab(0,spawn+1,AMIRAL,pthread_self());
       DessineVaisseauAmiral(0,spawn);
+      pthread_mutex_unlock(&mutexGrille);
       alarm(nbalarm);
       if(depl == 1) // deplacement a droite
       {
         while(!alarmStop)
         {
-          while(!alarmStop && spawn + 1 < 22)
+          while(!alarmStop && (spawn + 1) < 23)
           {
+            Attente(200);
             pthread_mutex_lock(&mutexGrille);
             switch(tab[0][spawn + 2].type)
             {
@@ -316,15 +332,16 @@ void *fctAmiral(void*){
               break;
             }
           }
-          while(!alarmStop && spawn - 1 > 7)
+          while(!alarmStop && (spawn - 1) > 7)
           {
+            Attente(200);
             pthread_mutex_lock(&mutexGrille);
             switch(tab[0][spawn - 1].type)
             {
               case 0:{
                 setTab(0,spawn+1,VIDE,0);
-                setTab(0,spawn-1,AMIRAL,pthread_self());
-                EffaceCarre(0,spawn);
+                setTab(0,spawn-1,AMIRAL,pthread_self()); 
+                EffaceCarre(0,spawn+1);               
                 DessineVaisseauAmiral(0,spawn-1);
                 spawn--;
                 pthread_mutex_unlock(&mutexGrille);
@@ -343,15 +360,16 @@ void *fctAmiral(void*){
       {
         while(!alarmStop)
         {
-          while(!alarmStop && spawn - 1 > 7)
+          while(!alarmStop && (spawn - 1) > 7)
           {
+            Attente(200);
             pthread_mutex_lock(&mutexGrille);
             switch(tab[0][spawn - 1].type)
             {
               case 0:{
                 setTab(0,spawn+1,VIDE,0);
                 setTab(0,spawn-1,AMIRAL,pthread_self());
-                EffaceCarre(0,spawn);
+                EffaceCarre(0,spawn+1);
                 DessineVaisseauAmiral(0,spawn-1);
                 spawn--;
                 pthread_mutex_unlock(&mutexGrille);
@@ -364,8 +382,9 @@ void *fctAmiral(void*){
               break;
             }
           }
-          while(!alarmStop && spawn + 1 < 22)
+          while(!alarmStop && (spawn + 1) < 23)
           {
+            Attente(200);
             pthread_mutex_lock(&mutexGrille);
             switch(tab[0][spawn + 2].type)
             {
@@ -390,7 +409,8 @@ void *fctAmiral(void*){
     }
 
   }
-  */
+
+  pthread_exit(NULL);
 }
 void moinsUneVie(void*)
 {
@@ -596,6 +616,7 @@ void *fctBombe(S_POSITION* bo){
     }
   Attente(160);
   } 
+  pthread_exit(NULL);
 }
 void *fctScore(void*){
   DessineChiffre(10,2,0);
@@ -726,6 +747,7 @@ void *fctFlotteAliens(void*)
   int randAlienLigne,randAlienColonne;
   bool tireBombe = true;
   bool trouveAlien = false;
+  printf("Test 14\n");
   if( pthread_mutex_lock(&mutexGrille) != 0)
   {
     perror("Erreur lock mutex grille \n");
@@ -775,6 +797,7 @@ void *fctFlotteAliens(void*)
         flotte = 2;
         pthread_exit(NULL);
       }
+      pthread_cond_signal(&condFlotteAliens);
       if(ok)
       { 
         pthread_exit(NULL);
@@ -937,6 +960,7 @@ void *fctFlotteAliens(void*)
         flotte = 2;
         pthread_exit(NULL);
       }
+      pthread_cond_signal(&condFlotteAliens);
       if(ok)
       { 
         pthread_exit(NULL);
@@ -1097,6 +1121,7 @@ void *fctFlotteAliens(void*)
       flotte = 2;
       pthread_exit(NULL);
     }
+    pthread_cond_signal(&condFlotteAliens);
     if(ok)
     { 
       pthread_exit(NULL);
@@ -1677,6 +1702,29 @@ void *fctMissile(S_POSITION* mi)
           free(mi);
           pthread_exit(NULL);   
         }
+        case 7:{
+          setTab(mi->L,mi->C,VIDE,0);
+          EffaceCarre(mi->L,mi->C);
+          pthread_kill(tab[mi->L -1][mi->C].tid,SIGCHLD);
+          if(pthread_mutex_lock(&mutexScore) != 0)
+          {
+            perror("Erreur lock mutex score \n");
+            exit(1);
+          }
+          score = score + 10;
+          MAJScore = true;
+          if(pthread_mutex_unlock(&mutexScore) != 0)
+          {
+            perror("Erreur unlock mutex score \n");
+            exit(1);
+          }
+          if(pthread_mutex_unlock(&mutexGrille) != 0)
+          {
+            perror("Erreur unlock mutex grille \n");
+            exit(1);
+          }
+        }
+        break;
       }
     }
     else
@@ -1694,6 +1742,7 @@ void *fctMissile(S_POSITION* mi)
     }
   Attente(80);
   }
+  pthread_exit(NULL);
 }
 void HandlerSigint(int sig)
 {
