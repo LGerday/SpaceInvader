@@ -51,20 +51,25 @@ int lb = 8;
 int cd = 18;
 int delay = 1000;
 int flotte;
+bool MAJScore = false;
+int score = 0;
 void HandlerSigusr1(int sig);
 void HandlerSigusr2(int sig);
 void HandlerSighup(int sig);
 void HandlerSigint(int sig);
 void HandlerSigquit(int sig);
-struct sigaction gauche,droite,espace,missile,mortVaisseau;
-pthread_t Vaiss,Missile,TimeOutMissile,Event,FlotteAliens,Invader; // identifiant different thread
-pthread_mutex_t mutexGrille,mutexColonne,mutexFlotteAliens; // mutex de la grille
+struct sigaction gauche,droite,espace,missile,mortVaisseau,bombe;
+pthread_t Vaiss,Missile,TimeOutMissile,Event,FlotteAliens,Invader,Score,Bombe; // identifiant different thread
+pthread_mutex_t mutexGrille,mutexColonne,mutexFlotteAliens,mutexScore; // mutex de la grille
+pthread_cond_t condScore;
 void *fctVaisseau(void *);
 void *fctMissile(S_POSITION* mi);
 void *fctTimeOut(void*);
 void *fctEvent(void*);
 void *fctInvader(void*);
 void *fctFlotteAliens(void*);
+void *fctScore(void*);
+void *fctBombe(S_POSITION* bo);
 void modifyFlotte();
 void afficheFlotte();
 void supprimeAlien();
@@ -106,21 +111,32 @@ int main(int argc,char* argv[])
 
   // Initialisation des mutex et variables de condition
   // TO DO
-  if(  pthread_mutex_init(&mutexGrille,NULL) != 0)
+  if(pthread_mutex_init(&mutexGrille,NULL) != 0)
   {
     perror("Erreur creation mutex grille\n");
     exit(1);
   }
-  if(  pthread_mutex_init(&mutexColonne,NULL) != 0)
+  if(pthread_mutex_init(&mutexColonne,NULL) != 0)
   {
     perror("Erreur creation mutex colonne\n");
     exit(1);
   }
-  if(  pthread_mutex_init(&mutexFlotteAliens,NULL) != 0)
+  if(pthread_mutex_init(&mutexFlotteAliens,NULL) != 0)
   {
     perror("Erreur creation mutex flotteAliens\n");
     exit(1);
   }
+  if( pthread_mutex_init(&mutexScore,NULL) != 0)
+  {
+    perror("Erreur creation mutex flotteAliens\n");
+    exit(1);
+  }
+  if(pthread_mutex_init(&mutexScore,NULL) != 0)
+  {
+    perror("Erreur creation mutex score\n");
+    exit(1);
+  }
+  pthread_cond_init(&condScore,NULL);
 
   // Armement des signaux
   // TO DO
@@ -148,6 +164,11 @@ int main(int argc,char* argv[])
   sigemptyset(&mortVaisseau.sa_mask);
   mortVaisseau.sa_flags = 0;
   sigaction(SIGQUIT,&mortVaisseau,NULL); 
+
+  bombe.sa_handler = HandlerSigint;
+  sigemptyset(&bombe.sa_mask);
+  bombe.sa_flags = 0;
+  sigaction(SIGINT,&bombe,NULL);
 
 
 
@@ -181,6 +202,11 @@ int main(int argc,char* argv[])
     perror("Error create thread invader \n");
     exit(1);
   }
+  if(pthread_create(&Score,NULL,fctScore,NULL) != 0)
+  {
+    perror("Error create thread invader \n");
+    exit(1);
+  }
 
   if(pthread_join(Event,NULL) != 0)
   {
@@ -192,6 +218,232 @@ int main(int argc,char* argv[])
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
+void *fctBombe(S_POSITION* bo){
+/*#define VIDE        0
+#define VAISSEAU    1
+#define MISSILE     2
+#define ALIEN       3
+#define BOMBE       4
+#define BOUCLIER1   5
+#define BOUCLIER2   6
+#define AMIRAL      7  */
+  sigset_t mask;
+  bombe.sa_handler = HandlerSigint;
+  sigaction(SIGINT,&bombe,NULL);
+
+  sigemptyset(&mask);
+  sigaddset(&mask,SIGUSR1);
+  sigaddset(&mask,SIGALRM);
+  sigaddset(&mask,SIGCHLD);
+  sigaddset(&mask,SIGUSR2);
+  sigaddset(&mask,SIGHUP);
+  sigaddset(&mask,SIGQUIT);
+  sigprocmask(SIG_SETMASK,&mask,NULL);
+
+  if(pthread_mutex_lock(&mutexGrille) != 0)
+  {
+    perror("Erreur lock mutex grille \n");
+    exit(1);
+  }
+  switch(tab[bo->L][bo->C].type)
+  {
+    case 0: {
+      // case vide
+      printf("Creation bombe case vide\n");
+      setTab(bo->L, bo->C, BOMBE, pthread_self());
+      DessineBombe(bo->L, bo->C);
+      if(pthread_mutex_unlock(&mutexGrille) != 0)
+      {
+        perror("Erreur unlock mutex grille \n");
+        exit(1);
+      }
+    }
+    break;
+    case 2:{
+      printf("Creation bombe case missile\n");
+      pthread_kill(tab[bo->L][bo->C].tid,SIGINT);
+      setTab(bo->L,bo->C,VIDE,0);
+      EffaceCarre(bo->L,bo->C);
+      if(pthread_mutex_unlock(&mutexGrille) != 0)
+      {
+        perror("Erreur unlock mutex grille \n");
+        exit(1);
+      }
+      free(bo);
+      pthread_exit(NULL);
+    }
+    break;
+    case 5:{
+      // bouclier 1
+      printf("Creation bombe case bouclier 1\n");
+      setTab(bo->L,bo->C,VIDE,0);
+      EffaceCarre(bo->L,bo->C);
+      setTab(bo->L, bo->C , BOUCLIER2 , 0);
+      DessineBouclier(bo->L, bo->C,2);
+      if(pthread_mutex_unlock(&mutexGrille) != 0)
+      {
+        perror("Erreur unlock mutex grille \n");
+        exit(1);
+      }
+      free(bo);
+      pthread_exit(NULL);         
+    }
+    break;
+    case 6:
+    {
+      //bouclier 2
+      printf("Creation bombe case bouclier 2\n");
+      setTab(bo->L,bo->C,VIDE,0);
+      EffaceCarre(bo->L,bo->C);
+      if(pthread_mutex_unlock(&mutexGrille) != 0)
+      {
+        perror("Erreur unlock mutex grille \n");
+        exit(1);
+      }
+      free(bo);
+      pthread_exit(NULL); 
+    }
+  }
+  Attente(160); 
+  while(1)
+  {
+    if( pthread_mutex_lock(&mutexGrille) != 0)
+    {
+      perror("Erreur lock mutex grille \n");
+      exit(1);
+    }
+    if(bo->L < NB_LIGNE-1)
+    {
+      switch(tab[bo->L + 1][bo->C].type)
+      {
+        case 0: {
+          // case vide
+          printf("bombe avance case vide\n");
+          setTab(bo->L,bo->C,VIDE,0);
+          EffaceCarre(bo->L,bo->C);
+          setTab(bo->L +1 , bo->C, BOMBE, pthread_self());
+          DessineBombe(bo->L +1, bo->C);
+          bo->L++;
+          if(pthread_mutex_unlock(&mutexGrille) != 0)
+          {
+            perror("Erreur unlock mutex grille \n");
+            exit(1);
+          }
+        }
+        break;
+        case 1:{
+          printf("bombe avance case vaisseau\n");
+          setTab(bo->L,bo->C,VIDE,0);
+          EffaceCarre(bo->L,bo->C);
+          kill(0,SIGQUIT);  
+          if(pthread_mutex_unlock(&mutexGrille) != 0)
+          {
+            perror("Erreur unlock mutex grille \n");
+            exit(1);
+          }
+          free(bo);
+          pthread_exit(NULL);       
+        }
+        break;
+        case 2:{
+          printf("bombe avance case missile\n");
+          pthread_kill(tab[bo->L+1][bo->C].tid,SIGINT);
+          setTab(bo->L+1,bo->C,VIDE,0);
+          EffaceCarre(bo->L+1,bo->C);
+          setTab(bo->L,bo->C,VIDE,0);
+          EffaceCarre(bo->L,bo->C);
+          if(pthread_mutex_unlock(&mutexGrille) != 0)
+          {
+            perror("Erreur unlock mutex grille \n");
+            exit(1);
+          }
+          free(bo);
+          pthread_exit(NULL);
+        }
+        break;
+        case 3:{
+          // fait rien c'est un alien on attend un tour de plus
+          if(pthread_mutex_unlock(&mutexGrille) != 0)
+          {
+            perror("Erreur unlock mutex grille \n");
+            exit(1);
+          }
+        }
+        break;
+        case 5:{
+          // bouclier 1
+          setTab(bo->L,bo->C,VIDE,0);
+          EffaceCarre(bo->L,bo->C);
+          setTab(bo->L +1, bo->C , BOUCLIER2 , 0);
+          EffaceCarre(bo->L +1, bo->C);
+          DessineBouclier(bo->L +1, bo->C,2);
+          if(pthread_mutex_unlock(&mutexGrille) != 0)
+          {
+            perror("Erreur unlock mutex grille \n");
+            exit(1);
+          }
+          free(bo);
+          pthread_exit(NULL);          
+        }
+        break;
+        case 6:
+        {
+          //bouclier 2
+          setTab(bo->L,bo->C,VIDE,0);
+          EffaceCarre(bo->L,bo->C);
+          setTab(bo->L +1, bo->C , VIDE , 0);
+          EffaceCarre(bo->L +1, bo->C);
+          if(pthread_mutex_unlock(&mutexGrille) != 0)
+          {
+            perror("Erreur unlock mutex grille \n");
+            exit(1);
+          }
+          free(bo);
+          pthread_exit(NULL);   
+        }
+      }
+    }
+    else
+    {
+      // detruit bombe fin de tab
+      setTab(bo->L,bo->C,VIDE,0);
+      EffaceCarre(bo->L,bo->C);      
+      if(pthread_mutex_unlock(&mutexGrille) != 0)
+      {
+        perror("Erreur unlock mutex grille \n");
+        exit(1);
+      }
+      free(bo);
+      pthread_exit(NULL);  
+    }
+  Attente(160);
+  } 
+}
+void *fctScore(void*){
+  DessineChiffre(10,2,0);
+  DessineChiffre(10,3,0);
+  DessineChiffre(10,4,0);
+  DessineChiffre(10,5,0);
+  pthread_mutex_lock(&mutexScore);
+  int print,digit,i;
+  while(!MAJScore)
+  {
+    i = 5;
+    pthread_cond_wait(&condScore,&mutexScore);
+    // augmenter 1 le score
+    print = score;
+    while(print != 0)
+    {
+      digit = print % 10;
+      print = print / 10;
+      DessineChiffre(10,i,digit);
+      i--;
+    }
+    MAJScore = false;
+  }
+  pthread_mutex_unlock(&mutexScore);
+  pthread_exit(NULL);
+}
 void *fctInvader(void*)
 {
   bool fin = false;
@@ -279,6 +531,9 @@ void *fctInvader(void*)
 void *fctFlotteAliens(void*)
 {
   int i,j,k;
+  int randAlienLigne,randAlienColonne;
+  bool tireBombe = true;
+  bool trouveAlien = false;
   if( pthread_mutex_lock(&mutexGrille) != 0)
   {
     perror("Erreur lock mutex grille \n");
@@ -349,22 +604,58 @@ void *fctFlotteAliens(void*)
             }
             else
             {
-              pthread_kill(tab[i][j+1].tid,SIGINT);
-              setTab(i,j+1,VIDE,0);
-              EffaceCarre(i,j+1);
-              setTab(i,j,VIDE,0);
-              EffaceCarre(i,j);
-              if( pthread_mutex_lock(&mutexFlotteAliens) != 0)
+              if(tab[i][j+1].type == MISSILE)
               {
-                perror("Erreur lock mutex grille \n");
-                exit(1);
+                pthread_kill(tab[i][j+1].tid,SIGINT);
+                setTab(i,j+1,VIDE,0);
+                EffaceCarre(i,j+1);
+                setTab(i,j,VIDE,0);
+                EffaceCarre(i,j);
+                if( pthread_mutex_lock(&mutexFlotteAliens) != 0)
+                {
+                  perror("Erreur lock mutex grille \n");
+                  exit(1);
+                }
+                nbAliens--;
+                if( pthread_mutex_unlock(&mutexFlotteAliens) != 0)
+                {
+                  perror("Erreur lock mutex grille \n");
+                  exit(1);
+                }
+                if(pthread_mutex_lock(&mutexScore) != 0)
+                {
+                  perror("Erreur lock mutex score \n");
+                  exit(1);
+                }
+                score++;
+                MAJScore = true;
+                if(pthread_mutex_unlock(&mutexScore) != 0)
+                {
+                  perror("Erreur unlock mutex score \n");
+                  exit(1);
+                }
+                pthread_cond_signal(&condScore);                
               }
-              nbAliens--;
-              if( pthread_mutex_unlock(&mutexFlotteAliens) != 0)
+              if(tab[i][j+1].type == BOMBE)
               {
-                perror("Erreur lock mutex grille \n");
-                exit(1);
+                pthread_kill(tab[i][j+1].tid,SIGINT);
+                setTab(i,j+1,VIDE,0);
+                EffaceCarre(i,j+1); 
+                setTab(i,j,VIDE,0);
+                EffaceCarre(i,j);
+                setTab(i, j+1, ALIEN, pthread_self());
+                DessineAlien(i,j+1);
+                S_POSITION * bo = (S_POSITION *)malloc(sizeof(S_POSITION));
+                bo->L = i+1;
+                bo->C = j+1;
+                if(pthread_create(&Bombe,NULL,(void*(*)(void*))fctBombe,bo) != 0)
+                {
+                  perror("Error create thread vaisseau \n");
+                  exit(1);
+                }              
+
               }
+
             }            
           }
           if( pthread_mutex_unlock(&mutexGrille) != 0)
@@ -381,6 +672,48 @@ void *fctFlotteAliens(void*)
       }  
       cg++;
       cd++;
+      if(tireBombe == true)
+      {
+        if( pthread_mutex_lock(&mutexGrille) != 0)
+        {
+          perror("Erreur lock mutex grille \n");
+          exit(1);
+        } 
+        randAlienLigne = rand()%lb + lh; // nombre entre lb et lh
+        randAlienColonne = rand()%cd + cg;
+        while(!trouveAlien)
+        {
+          if(tab[randAlienLigne][randAlienColonne].type == ALIEN)
+          {
+            S_POSITION * bo = (S_POSITION *)malloc(sizeof(S_POSITION));
+            bo->L = randAlienLigne+1;
+            bo->C = randAlienColonne;
+            if(pthread_create(&Bombe,NULL,(void*(*)(void*))fctBombe,bo) != 0)
+            {
+              perror("Error create thread vaisseau \n");
+              exit(1);
+            }           
+            tireBombe = false;
+            trouveAlien = true;            
+          }
+          else
+          {
+            randAlienLigne = rand()%lb + lh; // nombre entre lb et lh
+            randAlienColonne = rand()%cd + cg;            
+          }
+        }
+
+        if( pthread_mutex_unlock(&mutexGrille) != 0)
+        {
+          perror("Erreur unlock mutex grille \n");
+          exit(1);
+        } 
+      }
+      else
+      {
+        tireBombe = true;
+      }
+      trouveAlien = false;
       if( pthread_mutex_lock(&mutexGrille) != 0)
       {
         perror("Erreur lock mutex grille \n");
@@ -431,22 +764,57 @@ void *fctFlotteAliens(void*)
             }
             else
             {
-              pthread_kill(tab[i][j-1].tid,SIGINT);
-              setTab(i,j-1,VIDE,0);
-              EffaceCarre(i,j-1);
-              setTab(i,j,VIDE,0);
-              EffaceCarre(i,j);
-              if( pthread_mutex_lock(&mutexFlotteAliens) != 0)
+              if(tab[i][j-1].type == MISSILE)
               {
-                perror("Erreur lock mutex grille \n");
-                exit(1);
+                pthread_kill(tab[i][j-1].tid,SIGINT);
+                setTab(i,j-1,VIDE,0);
+                EffaceCarre(i,j-1);
+                setTab(i,j,VIDE,0);
+                EffaceCarre(i,j);
+                if( pthread_mutex_lock(&mutexFlotteAliens) != 0)
+                {
+                  perror("Erreur lock mutex grille \n");
+                  exit(1);
+                }
+                nbAliens--;
+                if( pthread_mutex_unlock(&mutexFlotteAliens) != 0)
+                {
+                  perror("Erreur lock mutex grille \n");
+                  exit(1);
+                }
+                if(pthread_mutex_lock(&mutexScore) != 0)
+                {
+                  perror("Erreur lock mutex score \n");
+                  exit(1);
+                }
+                score++;
+                MAJScore = true;
+                if(pthread_mutex_unlock(&mutexScore) != 0)
+                {
+                  perror("Erreur unlock mutex score \n");
+                  exit(1);
+                }
+                pthread_cond_signal(&condScore);                
               }
-              nbAliens--;
-              if( pthread_mutex_unlock(&mutexFlotteAliens) != 0)
+              if(tab[i][j-1].type == BOMBE)
               {
-                perror("Erreur lock mutex grille \n");
-                exit(1);
+                pthread_kill(tab[i][j-1].tid,SIGINT);
+                setTab(i,j-1,VIDE,0);
+                EffaceCarre(i,j-1); 
+                setTab(i,j,VIDE,0);
+                EffaceCarre(i,j);
+                setTab(i, j-1, ALIEN, pthread_self());
+                DessineAlien(i,j-1);
+                S_POSITION * bo = (S_POSITION *)malloc(sizeof(S_POSITION));
+                bo->L = i+1;
+                bo->C = j-1;
+                if(pthread_create(&Bombe,NULL,(void*(*)(void*))fctBombe,bo) != 0)
+                {
+                  perror("Error create thread vaisseau \n");
+                  exit(1);
+                }                 
               }
+
             }
           }
           if( pthread_mutex_unlock(&mutexGrille) != 0)
@@ -463,6 +831,48 @@ void *fctFlotteAliens(void*)
       }  
       cg--;
       cd--;
+      if(tireBombe == true)
+      {
+        if( pthread_mutex_lock(&mutexGrille) != 0)
+        {
+          perror("Erreur lock mutex grille \n");
+          exit(1);
+        } 
+        randAlienLigne = rand()%lb + lh; // nombre entre lb et lh
+        randAlienColonne = rand()%cd + cg;
+        while(!trouveAlien)
+        {
+          if(tab[randAlienLigne][randAlienColonne].type == ALIEN)
+          {
+            S_POSITION * bo = (S_POSITION *)malloc(sizeof(S_POSITION));
+            bo->L = randAlienLigne+1;
+            bo->C = randAlienColonne;
+            if(pthread_create(&Bombe,NULL,(void*(*)(void*))fctBombe,bo) != 0)
+            {
+              perror("Error create thread vaisseau \n");
+              exit(1);
+            }           
+            tireBombe = false;
+            trouveAlien = true;            
+          }
+          else
+          {
+            randAlienLigne = rand()%lb + lh; // nombre entre lb et lh
+            randAlienColonne = rand()%cd + cg;            
+          }
+        }
+
+        if( pthread_mutex_unlock(&mutexGrille) != 0)
+        {
+          perror("Erreur unlock mutex grille \n");
+          exit(1);
+        } 
+      }
+      else
+      {
+        tireBombe = true;
+      }
+      trouveAlien = false;
       if( pthread_mutex_lock(&mutexGrille) != 0)
       {
         perror("Erreur lock mutex grille \n");
@@ -510,22 +920,57 @@ void *fctFlotteAliens(void*)
           }
           else
           {
-            pthread_kill(tab[i+1][j].tid,SIGINT);
-            setTab(i+1,j,VIDE,0);
-            EffaceCarre(i+1,j);
-            setTab(i,j,VIDE,0);
-            EffaceCarre(i,j);
-            if( pthread_mutex_lock(&mutexFlotteAliens) != 0)
+            if(tab[i + 1][j].type == MISSILE)
             {
-              perror("Erreur lock mutex grille \n");
-              exit(1);
+              pthread_kill(tab[i+1][j].tid,SIGINT);
+              setTab(i+1,j,VIDE,0);
+              EffaceCarre(i+1,j);
+              setTab(i,j,VIDE,0);
+              EffaceCarre(i,j);
+              if( pthread_mutex_lock(&mutexFlotteAliens) != 0)
+              {
+                perror("Erreur lock mutex grille \n");
+                exit(1);
+              }
+              nbAliens--;
+              if( pthread_mutex_unlock(&mutexFlotteAliens) != 0)
+              {
+                perror("Erreur lock mutex grille \n");
+                exit(1);
+              }
+              if(pthread_mutex_lock(&mutexScore) != 0)
+              {
+                perror("Erreur lock mutex score \n");
+                exit(1);
+              }
+              score++;
+              MAJScore = true;
+              if(pthread_mutex_unlock(&mutexScore) != 0)
+              {
+                perror("Erreur unlock mutex score \n");
+                exit(1);
+              }
+              pthread_cond_signal(&condScore);             
             }
-            nbAliens--;
-            if( pthread_mutex_unlock(&mutexFlotteAliens) != 0)
+            if(tab[i + 1][j].type == BOMBE)
             {
-              perror("Erreur lock mutex grille \n");
-              exit(1);
+              pthread_kill(tab[i+1][j].tid,SIGINT);
+              setTab(i+1,j,VIDE,0);
+              EffaceCarre(i+1,j); 
+              setTab(i,j,VIDE,0);
+              EffaceCarre(i,j);
+              setTab(i+1, j, ALIEN, pthread_self());
+              DessineAlien(i+1,j);
+              S_POSITION * bo = (S_POSITION *)malloc(sizeof(S_POSITION));
+              bo->L = i+2;
+              bo->C = j;
+              if(pthread_create(&Bombe,NULL,(void*(*)(void*))fctBombe,bo) != 0)
+              {
+                perror("Error create thread vaisseau \n");
+                exit(1);
+              }               
             }
+
           }          
         }
         if( pthread_mutex_unlock(&mutexGrille) != 0)
@@ -543,6 +988,48 @@ void *fctFlotteAliens(void*)
     }  
     lh++;
     lb++;
+      if(tireBombe == true)
+      {
+        if( pthread_mutex_lock(&mutexGrille) != 0)
+        {
+          perror("Erreur lock mutex grille \n");
+          exit(1);
+        } 
+        randAlienLigne = rand()%lb + lh; // nombre entre lb et lh
+        randAlienColonne = rand()%cd + cg;
+        while(!trouveAlien)
+        {
+          if(tab[randAlienLigne][randAlienColonne].type == ALIEN)
+          {
+            S_POSITION * bo = (S_POSITION *)malloc(sizeof(S_POSITION));
+            bo->L = randAlienLigne+1;
+            bo->C = randAlienColonne;
+            if(pthread_create(&Bombe,NULL,(void*(*)(void*))fctBombe,bo) != 0)
+            {
+              perror("Error create thread vaisseau \n");
+              exit(1);
+            }           
+            tireBombe = false;
+            trouveAlien = true;            
+          }
+          else
+          {
+            randAlienLigne = rand()%lb + lh; // nombre entre lb et lh
+            randAlienColonne = rand()%cd + cg;            
+          }
+        }
+
+        if( pthread_mutex_unlock(&mutexGrille) != 0)
+        {
+          perror("Erreur unlock mutex grille \n");
+          exit(1);
+        } 
+      }
+      else
+      {
+        tireBombe = true;
+      }
+    trouveAlien = false;
     if( pthread_mutex_lock(&mutexGrille) != 0)
     {
       perror("Erreur lock mutex grille \n");
@@ -803,13 +1290,13 @@ void *fctMissile(S_POSITION* mi)
       EffaceCarre(mi->L,mi->C);
       if(pthread_mutex_lock(&mutexFlotteAliens) != 0)
       {
-        perror("Erreur unlock mutex grille \n");
+        perror("Erreur lock mutex flotte \n");
         exit(1);
       }
       nbAliens--;
       if(pthread_mutex_unlock(&mutexFlotteAliens) != 0)
       {
-        perror("Erreur unlock mutex grille \n");
+        perror("Erreur unlock mutex flotte \n");
         exit(1);
       }
       if(pthread_mutex_unlock(&mutexGrille) != 0)
@@ -817,8 +1304,34 @@ void *fctMissile(S_POSITION* mi)
         perror("Erreur unlock mutex grille \n");
         exit(1);
       }
+      if(pthread_mutex_lock(&mutexScore) != 0)
+      {
+        perror("Erreur lock mutex score \n");
+        exit(1);
+      }
+      score++;
+      MAJScore = true;
+      if(pthread_mutex_unlock(&mutexScore) != 0)
+      {
+        perror("Erreur unlock mutex score \n");
+        exit(1);
+      }
+      pthread_cond_signal(&condScore);
       free(mi);
       pthread_exit(NULL); 
+    }
+    break;
+    case 4:{
+      pthread_kill(tab[mi->L][mi->C].tid,SIGINT);
+      setTab(mi->L,mi->C,VIDE,0);
+      EffaceCarre(mi->L,mi->C);
+      if(pthread_mutex_unlock(&mutexGrille) != 0)
+      {
+        perror("Erreur unlock mutex grille \n");
+        exit(1);
+      }
+      free(mi);
+      pthread_exit(NULL);      
     }
     break;
     case 5:{
@@ -899,8 +1412,36 @@ void *fctMissile(S_POSITION* mi)
             perror("Erreur unlock mutex grille \n");
             exit(1);
           }
+          if(pthread_mutex_lock(&mutexScore) != 0)
+          {
+            perror("Erreur lock mutex score \n");
+            exit(1);
+          }
+          score++;
+          MAJScore = true;
+          if(pthread_mutex_unlock(&mutexScore) != 0)
+          {
+            perror("Erreur unlock mutex score \n");
+            exit(1);
+          }
+          pthread_cond_signal(&condScore);
           free(mi);
           pthread_exit(NULL);
+        }
+        break;
+        case 4:{
+          pthread_kill(tab[mi->L-1][mi->C].tid,SIGINT);
+          setTab(mi->L-1,mi->C,VIDE,0);
+          EffaceCarre(mi->L-1,mi->C);
+          setTab(mi->L,mi->C,VIDE,0);
+          EffaceCarre(mi->L,mi->C);
+          if(pthread_mutex_unlock(&mutexGrille) != 0)
+          {
+            perror("Erreur unlock mutex grille \n");
+            exit(1);
+          }
+          free(mi);
+          pthread_exit(NULL);      
         }
         break;
         case 5:{
