@@ -194,32 +194,23 @@ int main(int argc,char* argv[])
 void *fctInvader(void*)
 {
   bool fin = false;
+  // cas 1 pour invasion reussi
+  // 2 pour invasion rate -> nbAliens = 0
+  int *cas;
   printf("Creation premiere flotte\n");
     if(pthread_create(&FlotteAliens,NULL,fctFlotteAliens,NULL) != 0)
     {
       perror("Error create thread flotteAliens \n");
       exit(1);
     }
-    if(pthread_join(FlotteAliens,NULL) != 0)
+    if(pthread_join(FlotteAliens,(void **)&cas) != 0)
     {
       perror("Erreur pthread join main\n");
       exit(1);
     }   
   while(!fin)
   {
-    printf("On relance la flotte\n");
-    delay = (delay/100)*70;
-    if(pthread_create(&FlotteAliens,NULL,fctFlotteAliens,NULL) != 0)
-    {
-      perror("Error create thread flotteAliens \n");
-      exit(1);
-    }
-    if(pthread_join(FlotteAliens,NULL) != 0)
-    {
-      perror("Erreur pthread join main\n");
-      exit(1);
-    } 
-    if(nbAliens != 0)
+    if(*cas == 1)
     {
       fin = true;
       if( pthread_mutex_lock(&mutexGrille) != 0)
@@ -234,6 +225,21 @@ void *fctInvader(void*)
         perror("Erreur lock mutex grille \n");
         exit(1);
       }
+    }
+    if(*cas == 2)
+    {
+      *cas == -1;
+      delay = (delay/100)*70;
+      if(pthread_create(&FlotteAliens,NULL,fctFlotteAliens,NULL) != 0)
+      {
+        perror("Error create thread flotteAliens \n");
+        exit(1);
+      }
+      if(pthread_join(FlotteAliens,(void **)&cas) != 0)
+      {
+        perror("Erreur pthread join main\n");
+        exit(1);
+      }       
     }
     // on recrée les bouclier
     if( pthread_mutex_lock(&mutexGrille) != 0)
@@ -258,6 +264,7 @@ void *fctInvader(void*)
 void *fctFlotteAliens(void*)
 {
   int i,j,k;
+  int rtr;
   if( pthread_mutex_lock(&mutexGrille) != 0)
   {
     perror("Erreur lock mutex grille \n");
@@ -305,7 +312,8 @@ void *fctFlotteAliens(void*)
       if(nbAliens == 0)
       { 
         printf("fin flotte plus d'aliens\n");
-        pthread_exit(NULL);
+        rtr = 2;
+        pthread_exit(&rtr);
       }
       printf("represente cd : k %d",k);
       afficheFlotte();
@@ -329,6 +337,7 @@ void *fctFlotteAliens(void*)
             }
             else
             {
+              pthread_kill(tab[i][j+1].tid,SIGINT);
               setTab(i,j+1,VIDE,0);
               EffaceCarre(i,j+1);
               setTab(i,j,VIDE,0);
@@ -376,7 +385,8 @@ void *fctFlotteAliens(void*)
       if(nbAliens == 0)
       { 
         printf("fin flotte plus d'aliens\n");
-        pthread_exit(NULL);
+        rtr = 2;
+        pthread_exit(&rtr);
       }
       printf("represente cg: k %d",k);
       afficheFlotte();
@@ -401,6 +411,7 @@ void *fctFlotteAliens(void*)
             }
             else
             {
+              pthread_kill(tab[i][j-1].tid,SIGINT);
               setTab(i,j-1,VIDE,0);
               EffaceCarre(i,j-1);
               setTab(i,j,VIDE,0);
@@ -446,7 +457,8 @@ void *fctFlotteAliens(void*)
     if(nbAliens == 0)
     { 
       printf("fin flotte plus d'aliens\n");
-      pthread_exit(NULL);
+      rtr = 2;
+      pthread_exit(&rtr);
     }
     for(i = lh ;i < lb + 1 ; i=i+2)
     {
@@ -468,6 +480,7 @@ void *fctFlotteAliens(void*)
           }
           else
           {
+            pthread_kill(tab[i+1][j].tid,SIGINT);
             setTab(i+1,j,VIDE,0);
             EffaceCarre(i+1,j);
             setTab(i,j,VIDE,0);
@@ -508,9 +521,16 @@ void *fctFlotteAliens(void*)
     } 
   }
   printf("On sort du thread flotte\n");
-  pthread_exit(NULL);
-
-
+  if(nbAliens == 0)
+  {
+    rtr = 2;
+    pthread_exit(&rtr);
+  }
+  else
+  {
+    rtr = 1;
+    pthread_exit(&rtr);
+  }
 }
 void *fctEvent(void*)
 {
@@ -547,6 +567,8 @@ void *fctEvent(void*)
 }
 void *fctVaisseau(void *)
 {
+  sigset_t mask;
+
   droite.sa_handler = HandlerSigusr1;
   sigaction(SIGUSR1,&droite,NULL);
 
@@ -558,6 +580,12 @@ void *fctVaisseau(void *)
 
   mortVaisseau.sa_handler = HandlerSigquit;
   sigaction(SIGQUIT,&mortVaisseau,NULL);
+
+  sigemptyset(&mask);
+  sigaddset(&mask,SIGINT);
+  sigaddset(&mask,SIGALRM);
+  sigaddset(&mask,SIGCHLD);
+  sigprocmask(SIG_SETMASK,&mask,NULL);
 
   colonne = 15;
   if( pthread_mutex_lock(&mutexGrille) != 0)
@@ -698,9 +726,18 @@ void HandlerSigquit(int sig)
 }
 void *fctMissile(S_POSITION* mi)
 {
-
+  sigset_t mask;
   missile.sa_handler = HandlerSigint;
   sigaction(SIGINT,&missile,NULL);
+
+  sigemptyset(&mask);
+  sigaddset(&mask,SIGUSR1);
+  sigaddset(&mask,SIGALRM);
+  sigaddset(&mask,SIGCHLD);
+  sigaddset(&mask,SIGUSR2);
+  sigaddset(&mask,SIGHUP);
+  sigaddset(&mask,SIGQUIT);
+  sigprocmask(SIG_SETMASK,&mask,NULL);
 
   if( pthread_mutex_lock(&mutexGrille) != 0)
   {
@@ -965,4 +1002,3 @@ void supprimeAlien(){
     exit(1);
   }   
 }
-// il faut masquer les signaux sur les differents thread selon le tableau des consignes
